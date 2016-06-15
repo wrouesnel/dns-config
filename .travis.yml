@@ -1,0 +1,14 @@
+language: go
+go:
+- '1.6'
+script:
+- make all
+deploy:
+  provider: releases
+  file: dns-config
+  on:
+    tags: true
+    branch: master
+    repo: wrouesnel/dns-config
+  api_key:
+    secure: NBJo7JaM5hi3QBL9d4u/ZAtBoGZRtaSijlGKSGy6F+Oec2yGX6WInR5EvYtx3QuhKIB8kGd3PHui8uYTjUz0a0n24BMVDxBrqEkZhcvUZAy3msVRX3tvh3cCTUGhOZ2sX5LV9CWFH6evRzx2GQSQg5sHrfkuQqKuOu/00h3XEmiyH4iMKCZx9y24/9zfsNUswoc8sDhyQdB3DOTOeYL8I0yoU9p4nr81lu4OyvhMOXyGVppqZ43FPWjNloP+3WaN8sA+Tvxdaa4GIE2sxy/VvoSGnWyJ8GyAURTk96B1pdiitTi3789kWXrQa/7IUxIPo92EA1ffhr9Qav+KCDW5n952bT/9wue/EPmo0htJ3Mv07c6lOx/f8McrjoxQJjQMex/OC6Mu3t6n3v5S/HrKi+6WiIrFmV2WL3WuIrfXIp8WvtYDn0jshTS48EYrCQpy7Z4ZcIKpAAtHIcIHtaJHG+kEQ9VJghPaxkoHk7snkizR225p2B+fXpk9Ey9kVJsCbfw6i2+XyV7Cm91vMv10Zj7KN36UTQENRM0Ca0T6tPQypwUl04qnZnIfyYlDPn8cdUZw/Df/imVP3YovdpVoVgoxw2W7V6eBt1i+UJxzFJYYjJJNxZR/FDeCD1FhjO2GUIo7KgrCaYZdVDyoGbEHKxR1sMWmQs29W4XCfucghAQ=

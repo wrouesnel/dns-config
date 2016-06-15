@@ -1,0 +1,30 @@
+[![Build Status](https://travis-ci.org/wrouesnel/dns-config.svg?branch=master)](https://travis-ci.org/wrouesnel/dns-config)
+
+# DNS Config
+
+General purpose tool for outputting or writing configuration files from DNS
+TXT entries.
+
+## Usage
+`dns-config` assumes that the local hostname is not reliable by default. When
+run it will automatically discover the local IP addresses and attempt to
+reverse resolve them all against the default DNS server.
+
+Valid hostnames are then queried recursively until a TXT record is found which
+includes the given configuration key.
+
+Example:
+```
+host.example.com $ dns-config key
+value
+```
+Returns a TXT record found under the following domains by priority:
+```
+key.host.example.com
+key.example.com
+key.com
+```
+
+The depth of the search can be limited by use of command `--required-suffix` commandline
+option e.g. `dns-config --required-suffix example.com` would limit the search to 
+go no further then `key.example.com`
