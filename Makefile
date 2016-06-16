@@ -13,4 +13,11 @@ vet:
 test:
 	go test -v .
 
-.PHONY: docker-build docker test vet
+examples-docker-image: dns-config
+	cp -f dns-config examples/dns-config
+	docker build --build-arg=http_proxy=$(http_proxy) -t wrouesnel/dns-config-examples examples
+
+run-examples: examples-docker-image
+	docker run -it --net=none --dns=127.0.0.1 wrouesnel/dns-config-examples
+
+.PHONY: test vet run-examples examples-docker-image
