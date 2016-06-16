@@ -36,6 +36,7 @@ var (
 	shouldFail = kingpin.Flag("fail", "If a requested flag is not found, exit 1 rather then returning a blank").Default("true").Bool()
 	allowMerge = kingpin.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
 	prefix = kingpin.Flag("dns-prefix", "Standard prefix appended to all tags. This is a useful shortcut to writing key.prefix a lot.").String()
+	outputPath = kingpin.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	configKeys = kingpin.Arg("name", "Configuration keys to search for a TXT configuration entries. Returned in-order for \"simple\" output type.").Required().Strings()
 )
 
@@ -130,13 +131,26 @@ func main() {
 		}
 	}
 
+	// Setup output file
+	var outfd *os.File
+	if *outputPath == "-" {
+		outfd = os.Stdout
+	} else {
+		var err error
+		outfd, err = os.OpenFile(*outputPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(0777))
+		if err != nil {
+			log.Fatalln("Could not open output file:", err)
+		}
+		defer outfd.Close()
+	}
+
 	// Do output processing.
 	switch *output {
 	case OutputSimple:
 		// Print out the found keys in the order they were requested, with blank lines for missing keys.
 		for _, name := range *configKeys {
 			value, _ := resultConfig[name]
-			fmt.Println(value)
+			fmt.Fprintln(outfd, value)
 		}
 	case OutputOneline:
 		// Print out the found keys in the order they were requested, with empty strings for missing keys.
@@ -145,12 +159,12 @@ func main() {
 			value, _ := resultConfig[name]
 			outputEntries = append(outputEntries, fmt.Sprintf("'%s'", value))
 		}
-		fmt.Println(strings.Join(outputEntries, " "))
+		fmt.Fprintln(outfd, strings.Join(outputEntries, " "))
 	case OutputEnv:
 		// Print out the found keys in the order they were requested suitable for eval'ing as shell script data
 		for _, name := range *configKeys {
 			value, _ := resultConfig[name]
-			fmt.Printf("%s=\"%s\"\n", name, value)
+			fmt.Fprintf(outfd, "%s=\"%s\"\n", name, value)
 		}
 	case OutputJson:
 		// Output the keys as a JSON object. This is suitable for many things, specifically p2cli input
@@ -158,7 +172,7 @@ func main() {
 		if err != nil {
 			log.Fatalln("Error marshalling JSON:", err)
 		}
-		if _, err := os.Stdout.Write(jsonBytes); err != nil {
+		if _, err := outfd.Write(jsonBytes); err != nil {
 			log.Fatalln("Error writing to stdout.")
 		}
 	case OutputJsonPretty:
@@ -166,7 +180,7 @@ func main() {
 		if err != nil {
 			log.Fatalln("Error marshalling JSON:", err)
 		}
-		if _, err := os.Stdout.Write(jsonBytes); err != nil {
+		if _, err := outfd.Write(jsonBytes); err != nil {
 			log.Fatalln("Error writing to stdout:", err)
 		}
 	default:
