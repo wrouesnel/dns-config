@@ -35,7 +35,8 @@ var (
 	requiredSuffix = kingpin.Flag("required-suffix", "If set, require all resolved parameters to end with this suffix.").String()
 	shouldFail = kingpin.Flag("fail", "If a requested flag is not found, exit 1 rather then returning a blank").Default("true").Bool()
 	allowMerge = kingpin.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
-	prefix = kingpin.Flag("dns-prefix", "Standard prefix appended to all tags. This is a useful shortcut to writing key.prefix a lot.").String()
+	entryJoiner = kingpin.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
+	suffix = kingpin.Flag("name-suffix", "Standard prefix appended to all tags. This is a useful shortcut to writing key.prefix a lot.").String()
 	outputPath = kingpin.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	configKeys = kingpin.Arg("name", "Configuration keys to search for a TXT configuration entries. Returned in-order for \"simple\" output type.").Required().Strings()
 )
@@ -81,12 +82,12 @@ func main() {
 		// Resolve all config entries for this hostname
 		for _, name := range *configKeys {
 			var queryName string
-			if *prefix != "" {
-				queryName = strings.Join([]string{name, *prefix}, ".")
+			if *suffix != "" {
+				queryName = strings.Join([]string{name, *suffix}, ".")
 			} else {
 				queryName = name
 			}
-			value, found := resolveConfig(queryName, hostname, *requiredSuffix)
+			value, found := resolveConfig(queryName, hostname, *requiredSuffix, *entryJoiner)
 			if found {
 				ourConfig[name] = value
 			}
@@ -238,7 +239,7 @@ func resolveHostnames() ([]string, error) {
 // Multiple entries are concatenated without spaces and returned as a single string.
 // Returns the value if any, and boolean indicating if the value was set blank
 // or was not found.
-func resolveConfig(name string, hostname string, requiredSuffix string) (string, bool) {
+func resolveConfig(name string, hostname string, requiredSuffix string, entryJoiner string) (string, bool) {
 	log := log.With("name", name).With("hostname", hostname)
 
 	// Split the hostname up into fragments
@@ -259,7 +260,7 @@ func resolveConfig(name string, hostname string, requiredSuffix string) (string,
 			log.Debugln("Failed querying", dnsName, err)
 		} else {
 			log.Debugln("Lookup", dnsName, "found value", txt)
-			return strings.Join(txt, ""), true
+			return strings.Join(txt, entryJoiner), true
 		}
 	}
 
