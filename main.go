@@ -53,6 +53,7 @@ var (
 	outputPath = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	outputAppend = app.Flag("append", "Append rather then overwriting output file.").Bool()
 	outputNoOverwrite = app.Flag("no-overwrite", "Don't write anything if the file already exists and force returning success.").Bool()
+	outputOnlyIfEmpty = app.Flag("output-only-if-empty", "Only write output if the target file has a file size of 0").Bool()
 	entryJoiner = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
 
 	configKeys = app.Arg("name", "Key names (dns-prefixes) to search for configuration values. Returned in-order for \"simple\" output type.").Required().Strings()
@@ -81,10 +82,18 @@ func run() int {
 	// Check no-overwrite flag. This is a trivial case which allows "only-once"
 	// configuration, or aborting configuration and using already installed
 	// values.
-	if *output != "-" && *outputNoOverwrite {
-		if _, err := os.Stat(*output); os.IsNotExist(err) {
-			log.Debugln("Output file exists and no overwrite requested. Exiting with success.")
-			return 0
+	{
+		if *output != "-" {
+			st, err := os.Stat(*output)
+			if *outputNoOverwrite && os.IsNotExist(err) {
+				log.Debugln("Output file exists and no overwrite requested. Exiting with success.")
+				return 0
+			}
+
+			if st.Size() != 0 && !*outputOnlyIfEmpty {
+				log.Debugln("Requested output only if the target file is empty and it is not.")
+				return 0
+			}
 		}
 	}
 
