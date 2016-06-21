@@ -33,6 +33,12 @@
 			"revisionTime": "2016-02-17T02:35:12Z"
 		},
 		{
+			"checksumSHA1": "CoRxz7vk573Zu/UcMS4PzpAsv3w=",
+			"path": "golang.org/x/sys/unix",
+			"revision": "b776ec39b3e54652e09028aaaaac9757f4f8211a",
+			"revisionTime": "2016-04-20T22:29:30-04:00"
+		},
+		{
 			"checksumSHA1": "QPs8F/aqKAAQJr8dLc3CVQ5SxlM=",
 			"path": "gopkg.in/alecthomas/kingpin.v2",
 			"revision": "8cccfa8eb2e3183254457fb1749b2667fbc364c7",
