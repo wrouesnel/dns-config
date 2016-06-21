@@ -1,28 +1,29 @@
 /*
 	This utility retrieves configuration information from DNS TXT records by reverse
 	resolving host IPs.
- */
+*/
 
 package main
 
 import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
-	"io"
-	"flag"
-	"fmt"
-	"encoding/json"
 
-	"gopkg.in/alecthomas/kingpin.v2"
 	"github.com/wrouesnel/go.log"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 const (
-	OutputSimple = "simple"
-	OutputOneline = "one-line"
-	OutputEnv = "env"
-	OutputJson = "json"
+	OutputSimple     = "simple"
+	OutputOneline    = "one-line"
+	OutputEnv        = "env"
+	OutputJson       = "json"
 	OutputJsonPretty = "json-pretty"
 
 	DnsTypeTXT = "txt"
@@ -36,48 +37,48 @@ var (
 
 	logLevel = app.Flag("log-level", "Logging level").Default("info").String()
 
-	useHostname = app.Flag("use-hostname", "Use a specified hostname, rather then reverse resolving IPs.").Bool()
-	hostname = app.Flag("hostname", "Hostname to query as if --use-hostname. Defaults to system hostname.").String()
-
-	recordType = app.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
-
-	suffix = app.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
-	requiredSuffix = app.Flag("required-suffix", "If set, require all resolved parameters to end with this suffix.").String()
-
-	noFail = app.Flag("no-fail", "Don't fail if a requested flag can't be found.").Bool()
-	allowMerge = app.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
-	hostnameOnly = app.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
-	additiveQuery = app.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
-
-	output = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s)", OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
-	outputPath = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
-	outputAppend = app.Flag("append", "Append rather then overwriting output file.").Bool()
+	// App-wide output configuration
+	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s)", OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
+	outputPath        = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
+	outputAppend      = app.Flag("append", "Append rather then overwriting output file.").Bool()
 	outputNoOverwrite = app.Flag("no-overwrite", "Don't write anything if the file already exists and force returning success.").Bool()
 	outputOnlyIfEmpty = app.Flag("output-only-if-empty", "Only write output if the target file has a file size of 0").Bool()
-	entryJoiner = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
+	entryJoiner       = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
 
-	configKeys = app.Arg("name", "Key names (dns-prefixes) to search for configuration values. Returned in-order for \"simple\" output type.").Required().Strings()
+	requiredSuffix = app.Flag("required-suffix", "If set, require all resolved parameters to end with this suffix.").String()
+
+	useHostname = app.Flag("use-hostname", "Use a specified hostname, rather then reverse resolving IPs.").Bool()
+	hostname    = app.Flag("hostname", "Hostname to query as if --use-hostname. Defaults to system hostname.").String()
+
+	getIPs       = app.Command("get-ips", "Print the list of discovered IPs for this host. Returns IPs can be limited with --required-suffix or --use-hostname.")
+	getHostnames = app.Command("get-hostnames", "Get the hostnames available from DNS lookup for this host")
+
+	get = app.Command("get", "Get a key value from DNS")
+
+	recordType    = get.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
+	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
+	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
+	noFail        = get.Flag("no-fail", "Don't fail if a requested flag can't be found.").Bool()
+	allowMerge    = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
+	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
+
+	configKeys = get.Arg("name", "Key names (dns-prefixes) to search for configuration values. Returned in-order for simple, one-line and env output types.").Required().Strings()
 )
+
+// An IP/Hostname pair
+type IPHostnamesPair struct {
+	Ip        net.IP
+	Hostnames []string
+}
+
+type getWriterFunc func() (io.WriteCloser, error)
 
 func main() {
 	kingpin.CommandLine.HelpFlag.Short('h')
 	kingpin.Version(Version)
-	kingpin.MustParse(app.Parse(os.Args[1:]))
+	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	flag.Set("log.level", *logLevel)
-
-	result := run()
-	os.Exit(result)
-}
-
-// We execute our real main in this function so we can defer functions before
-// exiting.
-func run() int {
-	// Sanity check conflictable values
-	if *requiredSuffix != "" && *hostnameOnly {
-		log.Errorln("--hostname-only overrides --required-suffix, meaning it will have no effect.")
-		return 1
-	}
 
 	// Check no-overwrite flag. This is a trivial case which allows "only-once"
 	// configuration, or aborting configuration and using already installed
@@ -87,14 +88,162 @@ func run() int {
 			st, err := os.Stat(*output)
 			if *outputNoOverwrite && os.IsNotExist(err) {
 				log.Debugln("Output file exists and no overwrite requested. Exiting with success.")
-				return 0
+				os.Exit(0)
 			}
 
 			if st.Size() != 0 && !*outputOnlyIfEmpty {
 				log.Debugln("Requested output only if the target file is empty and it is not.")
-				return 0
+				os.Exit(0)
 			}
 		}
+	}
+
+	// Create a function we'll use to write the output file. This lets the
+	// operation fail later without overwriting anything.
+	outfdFunc := func() (io.WriteCloser, error) {
+		// Setup output file
+		var outfd *os.File
+		if *outputPath == "-" {
+			outfd = os.Stdout
+		} else {
+			var err error
+			flags := os.O_CREATE | os.O_WRONLY
+			if *outputAppend {
+				flags = flags | os.O_APPEND
+			} else {
+				flags = flags | os.O_TRUNC
+			}
+			outfd, err = os.OpenFile(*outputPath, flags, os.FileMode(0777))
+			if err != nil {
+				log.Errorln("Could not open output file:", err)
+				return nil, err
+			}
+		}
+		return outfd, nil
+	}
+
+	var result int
+	switch parsedCmd {
+	case get.FullCommand():
+		result = cmdGet(outfdFunc)
+	case getHostnames.FullCommand():
+		result = cmdGetHostnames(outfdFunc)
+	case getIPs.FullCommand():
+		result = cmdGetIPs(outfdFunc)
+	}
+
+	os.Exit(result)
+}
+
+// get-ips returns all the discovered IPs on the machine, optionally filtered
+// by a required DNS suffix or hostname.
+func cmdGetIPs(fdFunc getWriterFunc) int {
+	// Sanity check conflictable values
+	if *useHostname && *requiredSuffix != "" {
+		log.Errorln("--use-hostname overrides --required-suffix, meaning it will have no effect.")
+		return 1
+	}
+
+	var suffix string
+	if *useHostname {
+		suffix = *hostname
+	} else if *requiredSuffix != "" {
+		suffix = *requiredSuffix
+	}
+
+	pairs, err := resolveIPsToHostnames()
+	if err != nil {
+		log.Errorln("Error while resolving local IPs to hostnames:", err)
+		return 1
+	}
+
+	resultMap := make(map[string]string)
+	matchedHostnames := []string{}
+	for _, pair := range pairs {
+		for _, hostname := range pair.Hostnames {
+			if strings.HasSuffix(hostname, suffix) {
+				resultMap[hostname] = pair.Ip.String()
+				matchedHostnames = append(matchedHostnames, hostname)
+				break // Found a match for this IP - break loop
+			}
+		}
+	}
+
+	// Get the output writer
+	outfd, err := fdFunc()
+	if err != nil {
+		return 1
+	}
+
+	// IP output is a bit odd - we treat the matching hostname as the request,
+	// and the value as an IP. This gives broadly sensible behavior for most
+	// use cases.
+	if err := writeOutput(*output, matchedHostnames, resultMap, outfd); err != nil {
+		return 1
+	}
+
+	log.Debugln("Exiting successfully.")
+	return 0
+}
+
+// get-hostnames returns all the discovered hostnames of a machine, optionally
+// filtered by a required suffix.
+func cmdGetHostnames(fdFunc getWriterFunc) int {
+	// Sanity check conflictable values
+	if *useHostname && *requiredSuffix != "" {
+		log.Errorln("--use-hostname overrides --required-suffix, meaning it will have no effect.")
+		return 1
+	}
+
+	var suffix string
+	if *useHostname {
+		suffix = *hostname
+	} else if *requiredSuffix != "" {
+		suffix = *requiredSuffix
+	}
+
+	pairs, err := resolveIPsToHostnames()
+	if err != nil {
+		log.Errorln("Error while resolving local IPs to hostnames:", err)
+		return 1
+	}
+
+	resultMap := make(map[string]string)
+	matchedIPs := []string{}
+	for _, pair := range pairs {
+		for _, hostname := range pair.Hostnames {
+			if strings.HasSuffix(hostname, suffix) {
+				existingValue, ok := resultMap[pair.Ip.String()]
+				if ok {
+					resultMap[pair.Ip.String()] = strings.Join([]string{existingValue, hostname}, *entryJoiner)
+				} else {
+					resultMap[pair.Ip.String()] = pair.Ip.String()
+					matchedIPs = append(matchedIPs, hostname)
+				}
+			}
+		}
+	}
+
+	// Get the output writer
+	outfd, err := fdFunc()
+	if err != nil {
+		return 1
+	}
+
+	if err := writeOutput(*output, matchedIPs, resultMap, outfd); err != nil {
+		return 1
+	}
+
+	log.Debugln("Exiting successfully.")
+	return 0
+}
+
+// Implement the normal get command
+func cmdGet(fdFunc getWriterFunc) int {
+	// Sanity check conflictable values
+	if *requiredSuffix != "" && *hostnameOnly {
+		log.Errorln("--hostname-only overrides --required-suffix, meaning it will have no effect.")
+		return 1
 	}
 
 	// If no hostname, get the OS hostname. If that fails, then we can't really
@@ -194,35 +343,23 @@ func run() int {
 		}
 	}
 
-	// Setup output file
-	var outfd *os.File
-	if *outputPath == "-" {
-		outfd = os.Stdout
-	} else {
-		var err error
-		flags := os.O_CREATE | os.O_WRONLY
-		if *outputAppend {
-			flags = flags | os.O_APPEND
-		} else {
-			flags = flags | os.O_TRUNC
-		}
-		outfd, err = os.OpenFile(*outputPath, flags, os.FileMode(0777))
-		if err != nil {
-			log.Errorln("Could not open output file:", err)
-			return 1
-		}
-		defer outfd.Close()
+	// Get the output writer
+	outfd, err := fdFunc()
+	if err != nil {
+		return 1
 	}
 
 	// Write output
-	writeOutput(*output, *configKeys, resultConfig, outfd)
+	if err := writeOutput(*output, *configKeys, resultConfig, outfd); err != nil {
+		return 1
+	}
 
 	log.Debugln("Exiting successfully.")
 	return 0
 }
 
 // Process a map of key-values to an output writer
-func writeOutput(outputType string, requestedKeys []string, resultMap map[string]string, wr io.Writer) {
+func writeOutput(outputType string, requestedKeys []string, resultMap map[string]string, wr io.Writer) error {
 	// Do output processing.
 	switch *output {
 	case OutputSimple:
@@ -249,31 +386,77 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 		// Output the keys as a JSON object. This is suitable for many things, specifically p2cli input
 		jsonBytes, err := json.Marshal(resultMap)
 		if err != nil {
-			log.Fatalln("Error marshalling JSON:", err)
+			log.Errorln("Error marshalling JSON:", err)
+			return err
 		}
 		if _, err := wr.Write(jsonBytes); err != nil {
-			log.Fatalln("Error writing to stdout.")
+			log.Errorln("Error writing to stdout.")
+			return err
 		}
 	case OutputJsonPretty:
 		jsonBytes, err := json.MarshalIndent(resultMap, "", "  ")
 		if err != nil {
-			log.Fatalln("Error marshalling JSON:", err)
+			log.Errorln("Error marshalling JSON:", err)
+			return err
 		}
 		if _, err := wr.Write(jsonBytes); err != nil {
-			log.Fatalln("Error writing to stdout:", err)
+			log.Errorln("Error writing to stdout:", err)
+			return err
 		}
 	default:
-		log.Fatalln("Invalid output format specified.")
+		log.Errorln("Invalid output format specified.")
+		return errors.New("Invalid output format specified.")
 	}
+
+	return nil
 }
 
 // Reverse resolve hostnames of the current host based on assigned IP addresses
+// Returns a string array of all hostnames
 func resolveHostnames() ([]string, error) {
-	ipAddrs := []string{}
+	pairs, err := resolveIPsToHostnames()
+	if err != nil {
+		return []string{}, err
+	}
+	hostnames := []string{}
+	for _, pair := range pairs {
+		hostnames = append(hostnames, pair.Hostnames...)
+	}
+	return hostnames, nil
+}
+
+// Reverse resolve hostnames of the current host based on assigned IP addresses.
+// Returns an array of IP -> Hostname mappings.
+func resolveIPsToHostnames() ([]IPHostnamesPair, error) {
+	ipAddrs, err := getLocalIPAddresses()
+	if err != nil {
+		return []IPHostnamesPair{}, err
+	}
+
+	// Reverse resolve all IPs, only keep those which match to a hostname
+	hostnamePairs := []IPHostnamesPair{}
+	for _, ip := range ipAddrs {
+		names, err := net.LookupAddr(ip.String())
+		if err == nil {
+			pair := IPHostnamesPair{
+				Ip:        ip,
+				Hostnames: names,
+			}
+			hostnamePairs = append(hostnamePairs, pair)
+		} else {
+			log.With("ip", ip.String()).Debugln("No DNS results for IP:", err)
+		}
+	}
+	return hostnamePairs, nil
+}
+
+// Get a list of all the IP addresses on the system
+func getLocalIPAddresses() ([]net.IP, error) {
+	ipAddrs := []net.IP{}
 
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return []string{}, err
+		return []net.IP{}, err
 	}
 
 	for _, netif := range ifaces {
@@ -291,22 +474,10 @@ func resolveHostnames() ([]string, error) {
 			case *net.IPAddr:
 				ip = v.IP
 			}
-			ipAddrs = append(ipAddrs, ip.String())
+			ipAddrs = append(ipAddrs, ip)
 		}
 	}
-
-	// Reverse resolve all IPs, only keep those which match to a hostname
-	hostnames := []string{}
-	for _, ip := range ipAddrs {
-		names, err := net.LookupAddr(ip)
-		if err != nil {
-			log.With("ip", ip).Debugln("Skipping IP - no result:", err)
-			continue
-		}
-		hostnames = append(hostnames, names...)
-	}
-
-	return hostnames, nil
+	return ipAddrs, nil
 }
 
 // Queries down the chain of possible hostnames and returns the config key
@@ -344,7 +515,7 @@ func resolveConfig(recordType string, name string, hostname string, requiredSuff
 		case DnsTypeSRV:
 			var srvCname string
 			var srvResults []*net.SRV
-			srvCname, srvResults, err = net.LookupSRV("","",dnsName)
+			srvCname, srvResults, err = net.LookupSRV("", "", dnsName)
 			log.Debugln("SRV lookup got CNAME", srvCname)
 			// Construct a result array of <host>:<port> fragments.
 			for _, srvResult := range srvResults {
