@@ -52,6 +52,7 @@ var (
 	output = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s)", OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
 	outputPath = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	outputAppend = app.Flag("append", "Append rather then overwriting output file.").Bool()
+	outputNoOverwrite = app.Flag("no-overwrite", "Don't write anything if the file already exists and force returning success.").Bool()
 	entryJoiner = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
 
 	configKeys = app.Arg("name", "Key names (dns-prefixes) to search for configuration values. Returned in-order for \"simple\" output type.").Required().Strings()
@@ -64,9 +65,27 @@ func main() {
 
 	flag.Set("log.level", *logLevel)
 
+	result := run()
+	os.Exit(result)
+}
+
+// We execute our real main in this function so we can defer functions before
+// exiting.
+func run() int {
 	// Sanity check conflictable values
 	if *requiredSuffix != "" && *hostnameOnly {
-		log.Fatalln("--hostname-only overrides --required-suffix, meaning it will have no effect.")
+		log.Errorln("--hostname-only overrides --required-suffix, meaning it will have no effect.")
+		return 1
+	}
+
+	// Check no-overwrite flag. This is a trivial case which allows "only-once"
+	// configuration, or aborting configuration and using already installed
+	// values.
+	if *output != "-" && *outputNoOverwrite {
+		if _, err := os.Stat(*output); os.IsNotExist(err) {
+			log.Debugln("Output file exists and no overwrite requested. Exiting with success.")
+			return 0
+		}
 	}
 
 	// If no hostname, get the OS hostname. If that fails, then we can't really
@@ -77,7 +96,8 @@ func main() {
 			var err error
 			*hostname, err = os.Hostname()
 			if err != nil {
-				log.Fatalln("No hostname specified and could not get system hostname:", err)
+				log.Errorln("No hostname specified and could not get system hostname:", err)
+				return 1
 			}
 		}
 		hostnames = []string{*hostname}
@@ -85,7 +105,8 @@ func main() {
 		var err error
 		hostnames, err = resolveHostnames()
 		if err != nil {
-			log.Fatalln("Error while trying to resolve hostnames:", err)
+			log.Errorln("Error while trying to resolve hostnames:", err)
+			return 1
 		}
 	}
 
@@ -135,12 +156,14 @@ func main() {
 				if _, exists := resultConfig[key]; !exists {
 					resultConfig[key] = value
 				} else {
-					log.Fatalln("Conflicting keys found for different domain trees:", foundConfigs)
+					log.Errorln("Conflicting keys found for different domain trees:", foundConfigs)
+					return 1
 				}
 			}
 		}
 	} else if len(foundConfigs) > 1 {
-		log.Fatalln("Found multiple configurations for different domain trees:", foundConfigs)
+		log.Errorln("Found multiple configurations for different domain trees:", foundConfigs)
+		return 1
 	}
 
 	// Check that all requested keys were found. This is normally fatal, but
@@ -155,7 +178,8 @@ func main() {
 
 	if len(missingKeys) > 0 {
 		if !*noFail {
-			log.Fatalln("Missing requested keys:", missingKeys)
+			log.Errorln("Missing requested keys:", missingKeys)
+			return 1
 		} else {
 			log.Debugln("Missing requested keys:", missingKeys)
 		}
@@ -175,7 +199,8 @@ func main() {
 		}
 		outfd, err = os.OpenFile(*outputPath, flags, os.FileMode(0777))
 		if err != nil {
-			log.Fatalln("Could not open output file:", err)
+			log.Errorln("Could not open output file:", err)
+			return 1
 		}
 		defer outfd.Close()
 	}
@@ -184,7 +209,7 @@ func main() {
 	writeOutput(*output, *configKeys, resultConfig, outfd)
 
 	log.Debugln("Exiting successfully.")
-	os.Exit(0)
+	return 0
 }
 
 // Process a map of key-values to an output writer
