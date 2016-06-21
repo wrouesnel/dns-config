@@ -21,6 +21,7 @@ import (
 
 const (
 	OutputSimple     = "simple"
+	OutputAsFlags    = "flags"
 	OutputOneline    = "one-line"
 	OutputEnv        = "env"
 	OutputJson       = "json"
@@ -38,7 +39,7 @@ var (
 	logLevel = app.Flag("log-level", "Logging level").Default("info").String()
 
 	// App-wide output configuration
-	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s)", OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
+	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s, %s)", OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
 	outputPath        = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	outputAppend      = app.Flag("append", "Append rather then overwriting output file.").Bool()
 	outputNoOverwrite = app.Flag("no-overwrite", "Don't write anything if the file already exists and force returning success.").Bool()
@@ -91,9 +92,11 @@ func main() {
 				os.Exit(0)
 			}
 
-			if st.Size() != 0 && !*outputOnlyIfEmpty {
-				log.Debugln("Requested output only if the target file is empty and it is not.")
-				os.Exit(0)
+			if err == nil {
+				if st.Size() != 0 && !*outputOnlyIfEmpty {
+					log.Debugln("Requested output only if the target file is empty and it is not.")
+					os.Exit(0)
+				}
 			}
 		}
 	}
@@ -367,6 +370,13 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 		for _, name := range requestedKeys {
 			value, _ := resultMap[name]
 			fmt.Fprintln(wr, value)
+		}
+	case OutputAsFlags:
+		// Print out the found keys in the order they were requested, formatted
+		// as --key=value command line flags.
+		for _, name := range requestedKeys {
+			value, _ := resultMap[name]
+			fmt.Fprintf(wr, "%s=%s ", name, value)
 		}
 	case OutputOneline:
 		// Print out the found keys in the order they were requested, with empty strings for missing keys.
