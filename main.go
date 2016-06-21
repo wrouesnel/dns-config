@@ -39,7 +39,7 @@ var (
 	logLevel = app.Flag("log-level", "Logging level").Default("info").String()
 
 	// App-wide output configuration
-	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s, %s)", OutputSimple, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
+	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s, %s)", OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
 	outputPath        = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	outputAppend      = app.Flag("append", "Append rather then overwriting output file.").Bool()
 	outputNoOverwrite = app.Flag("no-overwrite", "Don't write anything if the file already exists and force returning success.").Bool()
