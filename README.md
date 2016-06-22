@@ -109,6 +109,14 @@ some deliberate opinions in how they want to consider the flags.
   discovered or provided hostnames. 
   * `--record-type` - DNS record type to search for. Defaults to `txt`
     for TXT records. Supports TXT and SRV (`srv`).
+    
+  * `--filter-values-by-hostname` - Filter the value results of the query by
+    the known hostnames of this host. This is useful when querying SRV
+    records to discover port numbers, but it is a string-based filter
+    and will work for any type of return values. Accepts the options:
+    * `none` - don't filter
+    * `ours` - return only results which contain one of our hostnames
+    * `theirs` - return only results do NOT contain one of our hostnames
   
   * `--name-suffix` - a suffix to the list of names which should be
     queried for but not looked for in arguments. 

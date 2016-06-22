@@ -29,6 +29,10 @@ const (
 
 	DnsTypeTXT = "txt"
 	DnsTypeSRV = "srv"
+
+	HostnameFilterNone = "none"
+	HostnameFilterOurs = "ours"
+	HostnameFilterTheirs = "theirs"
 )
 
 var Version = "0.0.0-dev"
@@ -57,6 +61,7 @@ var (
 	get = app.Command("get", "Get a key value from DNS")
 
 	recordType    = get.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
+	hostnameFilter = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
 	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
 	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
 	noFail        = get.Flag("no-fail", "Don't fail if a requested flag can't be found.").Bool()
@@ -297,9 +302,39 @@ func cmdGet(fdFunc getWriterFunc) int {
 				*requiredSuffix = hostname
 			}
 
-			value, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *entryJoiner, *additiveQuery)
+			values, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery)
 			if found {
-				ourConfig[name] = value
+				filteredResult := []string{}
+				switch *hostnameFilter {
+				case HostnameFilterNone:
+					filteredResult = values
+				case HostnameFilterOurs:
+					for _, value := range values {
+						for _, hostname := range hostnames {
+							if strings.Contains(value, hostname) {
+								// Contains one of our hostnames, allow it through.
+								filteredResult = append(filteredResult, value)
+								break
+							}
+						}
+					}
+				case HostnameFilterTheirs:
+					for _, value := range values {
+						for _, hostname := range hostnames {
+							if !strings.Contains(value, hostname) {
+								// Does not contain one of our hostnames, allow
+								// it through.
+								filteredResult = append(filteredResult, value)
+								break
+							}
+						}
+					}
+				default:
+					log.Errorln("Unknown hostname filter option:", *hostnameFilter)
+					return 1
+				}
+
+				ourConfig[name] = strings.Join(filteredResult, *entryJoiner)
 			}
 		}
 		// Only add if we actually found some content.
@@ -495,7 +530,7 @@ func getLocalIPAddresses() ([]net.IP, error) {
 // Multiple entries are concatenated without spaces and returned as a single string.
 // Returns the value if any, and boolean indicating if the value was set blank
 // or was not found.
-func resolveConfig(recordType string, name string, hostname string, requiredSuffix string, entryJoiner string, recurse bool) (string, bool) {
+func resolveConfig(recordType string, name string, hostname string, requiredSuffix string, recurse bool) ([]string, bool) {
 	log := log.With("name", name).With("hostname", hostname)
 
 	// Split the hostname up into fragments
@@ -549,7 +584,7 @@ func resolveConfig(recordType string, name string, hostname string, requiredSuff
 
 	if len(results) == 0 {
 		log.Debugln("Found no keys")
-		return "", false
+		return []string{}, false
 	}
-	return strings.Join(results, entryJoiner), true
+	return results, true
 }
