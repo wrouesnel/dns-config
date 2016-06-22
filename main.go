@@ -46,7 +46,7 @@ var (
 	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s, %s)", OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
 	outputPath        = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	outputAppend      = app.Flag("append", "Append rather then overwriting output file.").Bool()
-	outputNoOverwrite = app.Flag("overwrite", "Overwrite the output file if it exists. If disabled, return success if file exists.").Default("true").Bool()
+	outputOverwrite = app.Flag("overwrite", "Overwrite the output file if it exists. If disabled, return success if file exists.").Default("true").Bool()
 	outputOnlyIfEmpty = app.Flag("output-only-if-empty", "Only write output if the target file has a file size of 0").Bool()
 	entryJoiner       = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
 	outputPrefix	  = app.Flag("add-value-prefix", "String to prefix to every output value").String()
@@ -66,7 +66,7 @@ var (
 	hostnameFilter = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
 	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
 	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
-	noFail        = get.Flag("fail", "Return failure if a requested flag cannot be found.").Default("true").Bool()
+	shouldFail    = get.Flag("fail", "Return failure if a requested flag cannot be found.").Default("true").Bool()
 	allowMerge    = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
 	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
 
@@ -94,7 +94,7 @@ func main() {
 	{
 		if *output != "-" {
 			st, err := os.Stat(*output)
-			if *outputNoOverwrite && os.IsNotExist(err) {
+			if *outputOverwrite && !os.IsNotExist(err) {
 				log.Debugln("Output file exists and no overwrite requested. Exiting with success.")
 				os.Exit(0)
 			}
@@ -351,7 +351,7 @@ func cmdGet() ([]string, map[string]string, error) {
 	}
 
 	if len(missingKeys) > 0 {
-		if !*noFail {
+		if *shouldFail {
 			return []string{}, nil, errors.New(fmt.Sprintln("Missing requested keys:", missingKeys))
 		} else {
 			log.Debugln("Missing requested keys:", missingKeys)
