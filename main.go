@@ -49,6 +49,8 @@ var (
 	outputNoOverwrite = app.Flag("no-overwrite", "Don't write anything if the file already exists and force returning success.").Bool()
 	outputOnlyIfEmpty = app.Flag("output-only-if-empty", "Only write output if the target file has a file size of 0").Bool()
 	entryJoiner       = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
+	outputPrefix	  = app.Flag("add-value-prefix", "String to prefix to every output value").String()
+	outputSuffix	  = app.Flag("add-value-suffix", "String to suffix to every output value").String()
 
 	requiredSuffix = app.Flag("required-suffix", "If set, require all resolved parameters to end with this suffix.").String()
 
@@ -106,50 +108,59 @@ func main() {
 		}
 	}
 
-	// Create a function we'll use to write the output file. This lets the
-	// operation fail later without overwriting anything.
-	outfdFunc := func() (io.WriteCloser, error) {
-		// Setup output file
-		var outfd *os.File
-		if *outputPath == "-" {
-			outfd = os.Stdout
-		} else {
-			var err error
-			flags := os.O_CREATE | os.O_WRONLY
-			if *outputAppend {
-				flags = flags | os.O_APPEND
-			} else {
-				flags = flags | os.O_TRUNC
-			}
-			outfd, err = os.OpenFile(*outputPath, flags, os.FileMode(0777))
-			if err != nil {
-				log.Errorln("Could not open output file:", err)
-				return nil, err
-			}
-		}
-		return outfd, nil
-	}
 
-	var result int
+	var keys []string
+	var resultConfig map[string]string
+	var err error
+
 	switch parsedCmd {
 	case get.FullCommand():
-		result = cmdGet(outfdFunc)
+		keys, resultConfig, err = cmdGet()
 	case getHostnames.FullCommand():
-		result = cmdGetHostnames(outfdFunc)
+		keys, resultConfig, err = cmdGetHostnames()
 	case getIPs.FullCommand():
-		result = cmdGetIPs(outfdFunc)
+		keys, resultConfig, err = cmdGetIPs()
 	}
 
-	os.Exit(result)
+	if err != nil {
+		log.Errorln(err)
+		os.Exit(1)
+	}
+
+	// Setup output file
+	var outfd *os.File
+	if *outputPath == "-" {
+		outfd = os.Stdout
+	} else {
+		var err error
+		flags := os.O_CREATE | os.O_WRONLY
+		if *outputAppend {
+			flags = flags | os.O_APPEND
+		} else {
+			flags = flags | os.O_TRUNC
+		}
+		outfd, err = os.OpenFile(*outputPath, flags, os.FileMode(0777))
+		if err != nil {
+			log.Errorln("Could not open output file:", err)
+			os.Exit(1)
+		}
+	}
+
+	// Write output
+	if err := writeOutput(*output, keys, resultConfig, outfd, *outputPrefix, *outputSuffix); err != nil {
+		log.Errorln("Error writing output:", err)
+		os.Exit(1)
+	}
+	outfd.Close()
+	os.Exit(0)
 }
 
 // get-ips returns all the discovered IPs on the machine, optionally filtered
 // by a required DNS suffix or hostname.
-func cmdGetIPs(fdFunc getWriterFunc) int {
+func cmdGetIPs() ([]string, map[string]string, error) {
 	// Sanity check conflictable values
 	if *useHostname && *requiredSuffix != "" {
-		log.Errorln("--use-hostname overrides --required-suffix, meaning it will have no effect.")
-		return 1
+		return []string{}, nil, errors.New("--use-hostname overrides --required-suffix, meaning it will have no effect.")
 	}
 
 	var suffix string
@@ -161,8 +172,7 @@ func cmdGetIPs(fdFunc getWriterFunc) int {
 
 	pairs, err := resolveIPsToHostnames()
 	if err != nil {
-		log.Errorln("Error while resolving local IPs to hostnames:", err)
-		return 1
+		return []string{}, nil, errors.New(fmt.Sprintln("Error while resolving local IPs to hostnames:", err))
 	}
 
 	resultMap := make(map[string]string)
@@ -177,30 +187,15 @@ func cmdGetIPs(fdFunc getWriterFunc) int {
 		}
 	}
 
-	// Get the output writer
-	outfd, err := fdFunc()
-	if err != nil {
-		return 1
-	}
-
-	// IP output is a bit odd - we treat the matching hostname as the request,
-	// and the value as an IP. This gives broadly sensible behavior for most
-	// use cases.
-	if err := writeOutput(*output, matchedHostnames, resultMap, outfd); err != nil {
-		return 1
-	}
-
-	log.Debugln("Exiting successfully.")
-	return 0
+	return matchedHostnames, resultMap, nil
 }
 
 // get-hostnames returns all the discovered hostnames of a machine, optionally
 // filtered by a required suffix.
-func cmdGetHostnames(fdFunc getWriterFunc) int {
+func cmdGetHostnames() ([]string, map[string]string, error) {
 	// Sanity check conflictable values
 	if *useHostname && *requiredSuffix != "" {
-		log.Errorln("--use-hostname overrides --required-suffix, meaning it will have no effect.")
-		return 1
+		return []string{}, nil, errors.New("--use-hostname overrides --required-suffix, meaning it will have no effect.")
 	}
 
 	var suffix string
@@ -212,8 +207,7 @@ func cmdGetHostnames(fdFunc getWriterFunc) int {
 
 	pairs, err := resolveIPsToHostnames()
 	if err != nil {
-		log.Errorln("Error while resolving local IPs to hostnames:", err)
-		return 1
+		return []string{}, nil, errors.New(fmt.Sprintln("Error while resolving local IPs to hostnames:", err))
 	}
 
 	resultMap := make(map[string]string)
@@ -232,26 +226,15 @@ func cmdGetHostnames(fdFunc getWriterFunc) int {
 		}
 	}
 
-	// Get the output writer
-	outfd, err := fdFunc()
-	if err != nil {
-		return 1
-	}
-
-	if err := writeOutput(*output, matchedIPs, resultMap, outfd); err != nil {
-		return 1
-	}
-
 	log.Debugln("Exiting successfully.")
-	return 0
+	return matchedIPs, resultMap, nil
 }
 
 // Implement the normal get command
-func cmdGet(fdFunc getWriterFunc) int {
+func cmdGet() ([]string, map[string]string, error) {
 	// Sanity check conflictable values
 	if *requiredSuffix != "" && *hostnameOnly {
-		log.Errorln("--hostname-only overrides --required-suffix, meaning it will have no effect.")
-		return 1
+		return []string{}, nil, errors.New("--hostname-only overrides --required-suffix, meaning it will have no effect.")
 	}
 
 	// If no hostname, get the OS hostname. If that fails, then we can't really
@@ -262,8 +245,7 @@ func cmdGet(fdFunc getWriterFunc) int {
 			var err error
 			*hostname, err = os.Hostname()
 			if err != nil {
-				log.Errorln("No hostname specified and could not get system hostname:", err)
-				return 1
+				return []string{}, nil, errors.New(fmt.Sprintln("No hostname specified and could not get system hostname:", err))
 			}
 		}
 		hostnames = []string{*hostname}
@@ -271,8 +253,7 @@ func cmdGet(fdFunc getWriterFunc) int {
 		var err error
 		hostnames, err = resolveHostnames()
 		if err != nil {
-			log.Errorln("Error while trying to resolve hostnames:", err)
-			return 1
+			return []string{}, nil, errors.New(fmt.Sprintln("Error while trying to resolve hostnames:", err))
 		}
 	}
 
@@ -330,8 +311,7 @@ func cmdGet(fdFunc getWriterFunc) int {
 						}
 					}
 				default:
-					log.Errorln("Unknown hostname filter option:", *hostnameFilter)
-					return 1
+					return []string{}, nil, errors.New(fmt.Sprintln("Unknown hostname filter option:", *hostnameFilter))
 				}
 
 				ourConfig[name] = strings.Join(filteredResult, *entryJoiner)
@@ -352,14 +332,12 @@ func cmdGet(fdFunc getWriterFunc) int {
 				if _, exists := resultConfig[key]; !exists {
 					resultConfig[key] = value
 				} else {
-					log.Errorln("Conflicting keys found for different domain trees:", foundConfigs)
-					return 1
+					return []string{}, nil, errors.New(fmt.Sprintln("Conflicting keys found for different domain trees:", foundConfigs))
 				}
 			}
 		}
 	} else if len(foundConfigs) > 1 {
-		log.Errorln("Found multiple configurations for different domain trees:", foundConfigs)
-		return 1
+		return []string{}, nil, errors.New(fmt.Sprintln("Found multiple configurations for different domain trees:", foundConfigs))
 	}
 
 	// Check that all requested keys were found. This is normally fatal, but
@@ -374,62 +352,54 @@ func cmdGet(fdFunc getWriterFunc) int {
 
 	if len(missingKeys) > 0 {
 		if !*noFail {
-			log.Errorln("Missing requested keys:", missingKeys)
-			return 1
+			return []string{}, nil, errors.New(fmt.Sprintln("Missing requested keys:", missingKeys))
 		} else {
 			log.Debugln("Missing requested keys:", missingKeys)
 		}
 	}
 
-	// Get the output writer
-	outfd, err := fdFunc()
-	if err != nil {
-		return 1
-	}
-
-	// Write output
-	if err := writeOutput(*output, *configKeys, resultConfig, outfd); err != nil {
-		return 1
-	}
-
-	log.Debugln("Exiting successfully.")
-	return 0
+	return *configKeys, resultConfig, nil
 }
 
 // Process a map of key-values to an output writer
-func writeOutput(outputType string, requestedKeys []string, resultMap map[string]string, wr io.Writer) error {
+func writeOutput(outputType string, requestedKeys []string, resultMap map[string]string, wr io.Writer, prefix string, suffix string) error {
+	processedMap := make(map[string]string, len(resultMap))
+	for k, v := range resultMap {
+		processedMap[k] = fmt.Sprintf("%s%s%s", prefix, v, suffix)
+	}
+
 	// Do output processing.
 	switch *output {
 	case OutputSimple:
 		// Print out the found keys in the order they were requested, with blank lines for missing keys.
 		for _, name := range requestedKeys {
-			value, _ := resultMap[name]
+			value, _ := processedMap[name]
 			fmt.Fprintln(wr, value)
 		}
 	case OutputAsFlags:
 		// Print out the found keys in the order they were requested, formatted
 		// as --key=value command line flags.
 		for _, name := range requestedKeys {
-			value, _ := resultMap[name]
+			value, _ := processedMap[name]
 			fmt.Fprintf(wr, "%s=%s ", name, value)
 		}
 	case OutputOneline:
 		// Print out the found keys in the order they were requested, with empty strings for missing keys.
 		var outputEntries []string
 		for _, name := range requestedKeys {
-			value, _ := resultMap[name]
+			value, _ := processedMap[name]
 			outputEntries = append(outputEntries, fmt.Sprintf("'%s'", value))
 		}
 		fmt.Fprintln(wr, strings.Join(outputEntries, " "))
 	case OutputEnv:
 		// Print out the found keys in the order they were requested suitable for eval'ing as shell script data
 		for _, name := range requestedKeys {
-			value, _ := resultMap[name]
+			value, _ := processedMap[name]
 			fmt.Fprintf(wr, "%s=\"%s\"\n", name, value)
 		}
 	case OutputJson:
 		// Output the keys as a JSON object. This is suitable for many things, specifically p2cli input
-		jsonBytes, err := json.Marshal(resultMap)
+		jsonBytes, err := json.Marshal(processedMap)
 		if err != nil {
 			log.Errorln("Error marshalling JSON:", err)
 			return err
@@ -439,7 +409,7 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 			return err
 		}
 	case OutputJsonPretty:
-		jsonBytes, err := json.MarshalIndent(resultMap, "", "  ")
+		jsonBytes, err := json.MarshalIndent(processedMap, "", "  ")
 		if err != nil {
 			log.Errorln("Error marshalling JSON:", err)
 			return err

@@ -96,6 +96,10 @@ some deliberate opinions in how they want to consider the flags.
   together with this joining character. Defaults to a newline. How this
   is used depends on how you choose to format your DNS configurations.
   
+* `--add-value-prefix` - string prefix to add to each value
+
+* `--add-value-suffix` - string suffix to add to each value
+  
 ### Lookup Options
 * `--hostname` - can set the hostname use to do the lookup rather then
   discovering it. Defaults to the current hostname returned by
