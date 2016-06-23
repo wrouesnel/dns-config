@@ -17,6 +17,7 @@ import (
 
 	"github.com/wrouesnel/go.log"
 	"gopkg.in/alecthomas/kingpin.v2"
+	"github.com/kballard/go-shellquote"
 )
 
 const (
@@ -371,7 +372,8 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 	// Do output processing.
 	switch *output {
 	case OutputSimple:
-		// Print out the found keys in the order they were requested, with blank lines for missing keys.
+		// Print out the found keys in the order they were requested,
+		// with blank lines for missing keys.
 		for _, name := range requestedKeys {
 			value, _ := processedMap[name]
 			fmt.Fprintln(wr, value)
@@ -384,21 +386,27 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 			fmt.Fprintf(wr, "%s=%s ", name, value)
 		}
 	case OutputOneline:
-		// Print out the found keys in the order they were requested, with empty strings for missing keys.
+		// Print out the found keys in the order they were requested,
+		// with empty strings for missing keys.
 		var outputEntries []string
 		for _, name := range requestedKeys {
 			value, _ := processedMap[name]
-			outputEntries = append(outputEntries, fmt.Sprintf("'%s'", value))
+			outputEntries = append(outputEntries, value)
 		}
-		fmt.Fprintln(wr, strings.Join(outputEntries, " "))
+
+		fmt.Fprintln(wr, shellquote.Join(outputEntries...))
 	case OutputEnv:
-		// Print out the found keys in the order they were requested suitable for eval'ing as shell script data
+		// Print out the found keys in the order they were requested suitable
+		// for eval'ing as shell script data. We make some effort to do escaping
+		// here so the trivial case will work with Docker's brain-dead env-file
+		// parser.
 		for _, name := range requestedKeys {
 			value, _ := processedMap[name]
-			fmt.Fprintf(wr, "%s=\"%s\"\n", name, value)
+			fmt.Fprintf(wr, "%s=%s\n", name, shellquote.Join(value))
 		}
 	case OutputJson:
-		// Output the keys as a JSON object. This is suitable for many things, specifically p2cli input
+		// Output the keys as a JSON object. This is suitable for many things,
+		// specifically p2cli input
 		jsonBytes, err := json.Marshal(processedMap)
 		if err != nil {
 			log.Errorln("Error marshalling JSON:", err)

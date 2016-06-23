@@ -27,6 +27,11 @@
 			"revisionTime": "2015-10-22T06:55:26Z"
 		},
 		{
+			"path": "github.com/kballard/go-shellquote",
+			"revision": "d8ec1a69a250a17bb0e419c386eac1f3711dc142",
+			"revisionTime": "2015-08-10T00:47:51-07:00"
+		},
+		{
 			"checksumSHA1": "gkquSZNkUCO69L+3qqGSG/xPeLk=",
 			"path": "github.com/wrouesnel/go.log",
 			"revision": "b8eb24d32dccf667c25b925dc0be4bc72ce355e8",
