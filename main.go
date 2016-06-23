@@ -147,6 +147,9 @@ func main() {
 		}
 	}
 
+	log.Debugln("Keys:", keys)
+	log.Debugln("Result Map:", resultConfig)
+
 	// Write output
 	if err := writeOutput(*output, keys, resultConfig, outfd, *outputPrefix, *outputSuffix); err != nil {
 		log.Errorln("Error writing output:", err)
@@ -220,8 +223,8 @@ func cmdGetHostnames() ([]string, map[string]string, error) {
 				if ok {
 					resultMap[pair.Ip.String()] = strings.Join([]string{existingValue, hostname}, *entryJoiner)
 				} else {
-					resultMap[pair.Ip.String()] = pair.Ip.String()
-					matchedIPs = append(matchedIPs, hostname)
+					resultMap[pair.Ip.String()] = hostname
+					matchedIPs = append(matchedIPs, pair.Ip.String())
 				}
 			}
 		}
