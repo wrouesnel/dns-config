@@ -142,6 +142,17 @@ some deliberate opinions in how they want to consider the flags.
     `--allow-merge` will instead allow `key1` and `key2` to be combined
     from the 2 hierarchies.
     
+  * `--private-key` - Specify a PEM format RSA private key to decrypt 
+  returned entries with. This allows storing secrets as DNS fields 
+  similar to various CI systems (i.e. Travis). Decryption is attempted 
+  on all returned entries, and only those where it is successful are 
+  returned. This allows multiple hosts to query the same key and only 
+  get values unique to them. Values are expecte to be encoded following
+  the [Javascript Object Signing and Encryption](http://jose.readthedocs.io/en/latest/) 
+  specification, and is implemented with the [go-jose](https://github.com/square/go-jose)
+  library. Compatible encrypted values can ge generated with the `encrypt`
+  command.
+    
   * `--additive` - normally a more specific key overrides a less specific
   key. `--additive` indicates that all values of a key should be combined
   and returned. So `key1.host.example.com` and `key1.example.com` both
@@ -156,6 +167,11 @@ some deliberate opinions in how they want to consider the flags.
   machine. The returned data is output as ip=host, so output formatting
   which prints the key-values will print the IP and then a list of
   hostnames which match it.
+  
+* `encrypt` - Generate JOSE encoded values suitable for use as encrypted
+DNS TXT entries. Encrypted values are *NOT* signed, as they are expected
+to be verified via DNS (i.e. you have sufficient control of the DNS
+server, and are using a DNSSEC compatible resolver.).
 
 ## More Help
 

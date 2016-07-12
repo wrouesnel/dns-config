@@ -18,6 +18,8 @@ import (
 	"github.com/wrouesnel/go.log"
 	"gopkg.in/alecthomas/kingpin.v2"
 	"github.com/kballard/go-shellquote"
+	"github.com/square/go-jose"
+	"io/ioutil"
 )
 
 const (
@@ -63,6 +65,8 @@ var (
 
 	get = app.Command("get", "Get a key value from DNS")
 
+	privateKeyFile	  = app.Flag("private-key", "Specify an RSA private key to use to decrypt entries. Only valid entries will be returned (invalid are ignored, allowing multiple keys).").String()
+
 	recordType    = get.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
 	hostnameFilter = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
 	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
@@ -72,6 +76,10 @@ var (
 	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
 
 	configKeys = get.Arg("name", "Key names (dns-prefixes) to search for configuration values. Returned in-order for simple, one-line and env output types.").Required().Strings()
+
+	encrypt = app.Command("encrypt", "Encrypt a value with the given public key")
+	encryptionKeyFile = encrypt.Arg("public-key", "Public encryption key to encrypt with. Encryption is RSA-OEAP, AES256").String()
+	encryptClearTextArg = encrypt.Arg("value", "String value to encrypt. If blank, read from stdin").String()
 )
 
 // An IP/Hostname pair
@@ -121,6 +129,16 @@ func main() {
 		keys, resultConfig, err = cmdGetHostnames()
 	case getIPs.FullCommand():
 		keys, resultConfig, err = cmdGetIPs()
+	case encrypt.FullCommand():
+		// Special case command always dumps to stdout.
+		result, err := cmdEncrypt()
+		if err != nil {
+			log.Errorln(err)
+			os.Exit(1)
+		} else {
+			fmt.Println(result)
+			os.Exit(0)
+		}
 	}
 
 	if err != nil {
@@ -236,6 +254,19 @@ func cmdGetHostnames() ([]string, map[string]string, error) {
 
 // Implement the normal get command
 func cmdGet() ([]string, map[string]string, error) {
+	var privateKey interface{}
+	if *privateKeyFile != "" {
+		var err error
+		privateKeyBytes, err := ioutil.ReadFile(*privateKeyFile)
+		if err != nil {
+			return []string{}, nil, errors.New(fmt.Sprintf("Specified private key fuke was unreadable: %s : %v", *privateKeyFile, err))
+		}
+		privateKey, err = jose.LoadPrivateKey(privateKeyBytes)
+		if err != nil {
+			return []string{}, nil, errors.New(fmt.Sprintf("Specified private key was unparseable: %s : %v", *privateKeyFile, err))
+		}
+	}
+
 	// Sanity check conflictable values
 	if *requiredSuffix != "" && *hostnameOnly {
 		return []string{}, nil, errors.New("--hostname-only overrides --required-suffix, meaning it will have no effect.")
@@ -287,7 +318,7 @@ func cmdGet() ([]string, map[string]string, error) {
 				*requiredSuffix = hostname
 			}
 
-			values, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery)
+			values, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery, privateKey)
 			if found {
 				filteredResult := []string{}
 				switch *hostnameFilter {
@@ -508,10 +539,13 @@ func getLocalIPAddresses() ([]net.IP, error) {
 
 // Queries down the chain of possible hostnames and returns the config key
 // found associated with a record.
-// Multiple entries are concatenated without spaces and returned as a single string.
-// Returns the value if any, and boolean indicating if the value was set blank
-// or was not found.
-func resolveConfig(recordType string, name string, hostname string, requiredSuffix string, recurse bool) ([]string, bool) {
+// Returns all found entries as a string array, and a bool indicating if the
+// value was found but blank vs. not found.
+// If privateKey is set then only entries which can be decoded as encrypted data
+// with the supplied key will be returned. This is applied to all record types,
+// though it only really makes sense with TXT records.
+func resolveConfig(recordType string, name string, hostname string,
+requiredSuffix string, recurse bool, privateKey interface{}) ([]string, bool) {
 	log := log.With("name", name).With("hostname", hostname)
 
 	// Split the hostname up into fragments
@@ -554,6 +588,29 @@ func resolveConfig(recordType string, name string, hostname string, requiredSuff
 		if err != nil {
 			log.Debugln("Failed querying", dnsName, err)
 		} else {
+			// Decrypt the results if we're expecting encrypted data
+			if privateKey != nil {
+				log.Debugln("Decrypting result...")
+				decryptedResult := []string{}
+				numDecryptedResults := 0
+				for _, encryptedResult := range result {
+					object, err := jose.ParseEncrypted(encryptedResult)
+					if err != nil {
+						log.Debugln("Could not parse result as JOSE object - ignoring:", err)
+						continue
+					}
+					decryptedValue, err := object.Decrypt(privateKey)
+					if err != nil {
+						log.Debugln("Could not decrypt JOSE object - ignoring:", err)
+						continue
+					}
+					decryptedResult = append(decryptedResult, string(decryptedValue))
+					numDecryptedResults++
+				}
+				result = decryptedResult
+				log.Debugln("Decrypted", numDecryptedResults, "of", len(result), "results successfully")
+			}
+
 			log.Debugln("Lookup", dnsName, "found value", result)
 			results = append(results, result...)
 			if !recurse {
@@ -568,4 +625,46 @@ func resolveConfig(recordType string, name string, hostname string, requiredSuff
 		return []string{}, false
 	}
 	return results, true
+}
+
+// Encrypt some input with the given private key
+func cmdEncrypt() (string, error) {
+	publicKeyBytes, err := ioutil.ReadFile(*encryptionKeyFile)
+	if err != nil {
+		return "", errors.New(fmt.Sprintln("Error reading public key file:", err))
+	}
+
+	publicKey, err := jose.LoadPublicKey(publicKeyBytes)
+	if err != nil {
+		return "", errors.New(fmt.Sprintln("Error parsing public key:", err))
+	}
+
+	encryptor, err := jose.NewEncrypter(jose.RSA_OAEP, jose.A256GCM, publicKey)
+	if err != nil {
+		return "", errors.New(fmt.Sprintln("Error initializing encryption engine:", err))
+	}
+
+	var clearText []byte
+
+	if *encryptClearTextArg == "" {
+		var err error
+		clearText, err = ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			return "", errors.New(fmt.Sprintln("Error reading from stdin", err))
+		}
+	} else {
+		clearText = []byte(*encryptClearTextArg)
+	}
+
+	object, err := encryptor.Encrypt(clearText)
+	if err != nil {
+		return "", errors.New(fmt.Sprintln("Error initializing encryption engine:", err))
+	}
+
+	encryptedText, err := object.CompactSerialize()
+	if err != nil {
+		return "", errors.New(fmt.Sprintln("Error initializing encryption engine:", err))
+	}
+
+	return encryptedText, nil
 }
