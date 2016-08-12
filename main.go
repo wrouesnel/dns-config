@@ -68,6 +68,7 @@ var (
 	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
 	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
 	shouldFail    = get.Flag("fail", "Return failure if a requested flag cannot be found.").Default("true").Bool()
+	shouldFailIfEmpty    = get.Flag("fail-if-empty", "Return failure if a requested flag is blank.").Default("true").Bool()
 	allowMerge    = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
 	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
 
@@ -347,10 +348,15 @@ func cmdGet() ([]string, map[string]string, error) {
 	// Check that all requested keys were found. This is normally fatal, but
 	// can be disabled.
 	missingKeys := []string{}
+	blankKeys := []string{}
 	for _, name := range *configKeys {
-		_, found := resultConfig[name]
+		value, found := resultConfig[name]
 		if !found {
 			missingKeys = append(missingKeys, name)
+		}
+
+		if value == "" {
+			blankKeys = append(blankKeys, name)
 		}
 	}
 
@@ -359,6 +365,14 @@ func cmdGet() ([]string, map[string]string, error) {
 			return []string{}, nil, errors.New(fmt.Sprintln("Missing requested keys:", missingKeys))
 		} else {
 			log.Debugln("Missing requested keys:", missingKeys)
+		}
+	}
+
+	if len(blankKeys) > 0 {
+		if *shouldFailIfEmpty {
+			return []string{}, nil, errors.New(fmt.Sprintln("Got blank requested keys and requested failure:", blankKeys))
+		} else {
+			log.Debugln("Blank requested keys:", missingKeys)
 		}
 	}
 

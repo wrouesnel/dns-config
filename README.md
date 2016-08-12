@@ -129,6 +129,10 @@ some deliberate opinions in how they want to consider the flags.
   
   * `--no-fail` - if a key can't be retreived, do _not_ exit with 
     failure (status 1).
+    
+  * `--fail-if-empty` - if a key is found but is blank, exit with
+    failure. This is useful when using hostname filtering to determine
+    membership of a SRV recordset, for example.
   
   * `--hostname-only` - prevents querying down the name hierarchy for
     values i.e. if looking for `key1` only `key1.host.example.com` will
