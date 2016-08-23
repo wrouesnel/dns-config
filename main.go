@@ -69,6 +69,7 @@ var (
 	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
 	shouldFail    = get.Flag("fail", "Return failure if a requested flag cannot be found.").Default("true").Bool()
 	shouldFailIfEmpty    = get.Flag("fail-if-empty", "Return failure if a requested flag is blank.").Default("true").Bool()
+	suppressBlank = get.Flag("suppress-blank", "If an entry is an empty string, omit the key entirely").Default("true").Bool()
 	allowMerge    = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
 	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
 
@@ -371,6 +372,13 @@ func cmdGet() ([]string, map[string]string, error) {
 			return []string{}, nil, errors.New(fmt.Sprintln("Got blank requested keys and requested failure:", blankKeys))
 		} else {
 			log.Debugln("Blank requested keys:", missingKeys)
+			for _, key := range blankKeys {
+				if *suppressBlank {
+					// Remove a blank key from the output
+					log.Debugln("Removing blank key due to suppress blank:", key)
+					delete(resultConfig, key)
+				}
+			}
 		}
 	}
 
