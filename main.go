@@ -86,7 +86,7 @@ type getWriterFunc func() (io.WriteCloser, error)
 
 func main() {
 	kingpin.CommandLine.HelpFlag.Short('h')
-	kingpin.Version(Version)
+	app.Version(Version)
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	flag.Set("log.level", *logLevel)
