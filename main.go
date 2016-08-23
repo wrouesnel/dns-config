@@ -67,8 +67,9 @@ var (
 	hostnameFilter = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
 	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
 	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
-	shouldFail    = get.Flag("fail", "Return failure if a requested flag cannot be found.").Default("true").Bool()
-	shouldFailIfEmpty    = get.Flag("fail-if-empty", "Return failure if a requested flag is blank.").Default("true").Bool()
+	shouldFail    = get.Flag("fail", "Return failure if a requested flag cannot be found (default true)").Default("true").Bool()
+	shouldFailIfEmpty    = get.Flag("fail-if-empty", "Return failure if a requested flag is blank (default true)").Default("true").Bool()
+	suppressBlank = get.Flag("suppress-blank", "Suppress outputing keys which only contain an empty string. Does not override --fail-if-empty").Bool()
 	allowMerge    = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
 	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
 
@@ -152,7 +153,7 @@ func main() {
 	log.Debugln("Result Map:", resultConfig)
 
 	// Write output
-	if err := writeOutput(*output, keys, resultConfig, outfd, *outputPrefix, *outputSuffix); err != nil {
+	if err := writeOutput(*output, keys, resultConfig, outfd, *outputPrefix, *outputSuffix, *suppressBlank); err != nil {
 		log.Errorln("Error writing output:", err)
 		os.Exit(1)
 	}
@@ -380,10 +381,22 @@ func cmdGet() ([]string, map[string]string, error) {
 }
 
 // Process a map of key-values to an output writer
-func writeOutput(outputType string, requestedKeys []string, resultMap map[string]string, wr io.Writer, prefix string, suffix string) error {
+func writeOutput(outputType string, requestedKeys []string, resultMap map[string]string, wr io.Writer, prefix string, suffix string, suppressBlankKeys bool) error {
 	processedMap := make(map[string]string, len(resultMap))
 	for k, v := range resultMap {
+		// If suppressing blank keys, skip the key entirely.
+		if suppressBlankKeys && v == "" {
+			continue
+		}
 		processedMap[k] = fmt.Sprintf("%s%s%s", prefix, v, suffix)
+	}
+	// Filter out requested keys which were suppressed in the previous step,
+	// but maintain their order.
+	processedKeys := []string{}
+	for _, key := range requestedKeys {
+		if _, ok := processedMap[key]; ok {
+			processedKeys = append(processedKeys, key)
+		}
 	}
 
 	// Do output processing.
@@ -391,14 +404,14 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 	case OutputSimple:
 		// Print out the found keys in the order they were requested,
 		// with blank lines for missing keys.
-		for _, name := range requestedKeys {
+		for _, name := range processedKeys {
 			value, _ := processedMap[name]
 			fmt.Fprintln(wr, value)
 		}
 	case OutputAsFlags:
 		// Print out the found keys in the order they were requested, formatted
 		// as --key=value command line flags.
-		for _, name := range requestedKeys {
+		for _, name := range processedKeys {
 			value, _ := processedMap[name]
 			fmt.Fprintf(wr, "%s=%s ", name, value)
 		}
@@ -406,7 +419,7 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 		// Print out the found keys in the order they were requested,
 		// with empty strings for missing keys.
 		var outputEntries []string
-		for _, name := range requestedKeys {
+		for _, name := range processedKeys {
 			value, _ := processedMap[name]
 			outputEntries = append(outputEntries, value)
 		}
@@ -417,7 +430,7 @@ func writeOutput(outputType string, requestedKeys []string, resultMap map[string
 		// for eval'ing as shell script data. We make some effort to do escaping
 		// here so the trivial case will work with Docker's brain-dead env-file
 		// parser.
-		for _, name := range requestedKeys {
+		for _, name := range processedKeys {
 			value, _ := processedMap[name]
 			fmt.Fprintf(wr, "%s=%s\n", name, shellquote.Join(value))
 		}
