@@ -113,6 +113,19 @@ some deliberate opinions in how they want to consider the flags.
   discovered or provided hostnames. 
   * `--record-type` - DNS record type to search for. Defaults to `txt`
     for TXT records. Supports TXT and SRV (`srv`).
+
+  * `--srv-no-port` - When looking up SRV records, suppress returning the
+    port with the lookup.
+
+  * `--srv-suppress-dot` - When looking up SRV records, suppress the trailing
+    dot of the returned name (i.e. `host.example.com.` becomes the more
+    common `host.example.com`.
+
+  * `--reverse-lookup` - Attempt to reverse lookup results to IP addresses.
+    This is extremely useful with hostname filtering for getting the intended
+    bind IP of a service for a host. Hosts which fail to lookup are dropped.
+    Values which look like host:port have the port element preserved (e.g.
+    SRV lookup results).
     
   * `--filter-values-by-hostname` - Filter the value results of the query by
     the known hostnames of this host. This is useful when querying SRV
@@ -121,7 +134,7 @@ some deliberate opinions in how they want to consider the flags.
     * `none` - don't filter
     * `ours` - return only results which contain one of our hostnames
     * `theirs` - return only results do NOT contain one of our hostnames
-  
+
   * `--name-suffix` - a suffix to the list of names which should be
     queried for but not looked for in arguments. 
     e.g. `--suffix config key1` results in dns queries for for 
@@ -133,6 +146,10 @@ some deliberate opinions in how they want to consider the flags.
   * `--fail-if-empty` - if a key is found but is blank, exit with
     failure. This is useful when using hostname filtering to determine
     membership of a SRV recordset, for example.
+
+  * `--suppress-blank` - if a key is found but is the empty string, suppress
+    emitting it as a key-value entirely. This is useful when building formatted
+    constructs with the prefix/postfix options.
   
   * `--hostname-only` - prevents querying down the name hierarchy for
     values i.e. if looking for `key1` only `key1.host.example.com` will

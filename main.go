@@ -15,9 +15,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/wrouesnel/go.log"
 	"gopkg.in/alecthomas/kingpin.v2"
-	"github.com/kballard/go-shellquote"
 )
 
 const (
@@ -31,10 +31,21 @@ const (
 	DnsTypeTXT = "txt"
 	DnsTypeSRV = "srv"
 
-	HostnameFilterNone = "none"
-	HostnameFilterOurs = "ours"
+	HostnameFilterNone   = "none"
+	HostnameFilterOurs   = "ours"
 	HostnameFilterTheirs = "theirs"
 )
+
+type SrvOptions struct {
+	SuppressPort        bool
+	SuppressTrailingDot bool
+}
+
+// Wraps the various flags which influence DnsType specific lookups and how
+// we handle them.
+type LookupOptions struct {
+	SrvOptions
+}
 
 var Version = "0.0.0-dev"
 
@@ -47,11 +58,11 @@ var (
 	output            = app.Flag("output-format", fmt.Sprintf("Set the output format (%s, %s, %s, %s, %s, %s)", OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)).Default(OutputSimple).Enum(OutputSimple, OutputAsFlags, OutputOneline, OutputEnv, OutputJson, OutputJsonPretty)
 	outputPath        = app.Flag("output", "File to write output to. Defaults to stdout.").Default("-").String()
 	outputAppend      = app.Flag("append", "Append rather then overwriting output file.").Bool()
-	outputOverwrite = app.Flag("overwrite", "Overwrite the output file if it exists. If disabled, return success if file exists.").Default("true").Bool()
+	outputOverwrite   = app.Flag("overwrite", "Overwrite the output file if it exists. If disabled, return success if file exists.").Default("true").Bool()
 	outputOnlyIfEmpty = app.Flag("output-only-if-empty", "Only write output if the target file has a file size of 0").Bool()
 	entryJoiner       = app.Flag("entry-joiner", "String to use for joining multiple entries with the same name. Defaults to newline.").Default("\n").String()
-	outputPrefix	  = app.Flag("add-value-prefix", "String to prefix to every output value").String()
-	outputSuffix	  = app.Flag("add-value-suffix", "String to suffix to every output value").String()
+	outputPrefix      = app.Flag("add-value-prefix", "String to prefix to every output value").String()
+	outputSuffix      = app.Flag("add-value-suffix", "String to suffix to every output value").String()
 
 	requiredSuffix = app.Flag("required-suffix", "If set, require all resolved parameters to end with this suffix.").String()
 
@@ -63,15 +74,19 @@ var (
 
 	get = app.Command("get", "Get a key value from DNS")
 
-	recordType    = get.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
-	hostnameFilter = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
-	suffix        = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
-	hostnameOnly  = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
-	shouldFail    = get.Flag("fail", "Return failure if a requested flag cannot be found (default true)").Default("true").Bool()
-	shouldFailIfEmpty    = get.Flag("fail-if-empty", "Return failure if a requested flag is blank (default true)").Default("true").Bool()
-	suppressBlank = get.Flag("suppress-blank", "Suppress outputing keys which only contain an empty string. Does not override --fail-if-empty").Bool()
-	allowMerge    = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
-	additiveQuery = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
+	recordType        = get.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
+	srvSuppressPort   = get.Flag("srv-no-port", "Don't return a port from SRV lookups").Bool()
+	srvSuppressDot    = get.Flag("srv-suppress-dot", "Suppress the canonical trailing dot in hostnames from SRV lookups (default true)").Default("true").Bool()
+	reverseLookup     = get.Flag("reverse-lookup", "Reverse lookup query results for IP addresses. Happens after hostname filtering.").Bool()
+	hostnameFilter    = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
+	ipFilter          = get.Flag("filter-values-by-ip", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
+	suffix            = get.Flag("name-suffix", "Standard prefix appended to all tags. The suffix is not added to the name in outputs.").String()
+	hostnameOnly      = get.Flag("hostname-only", "Do not recursively query the path hierarchy. Use the top-level hostname only. Overrides required-suffix.").Bool()
+	shouldFail        = get.Flag("fail", "Return failure if a requested flag cannot be found (default true)").Default("true").Bool()
+	shouldFailIfEmpty = get.Flag("fail-if-empty", "Return failure if a requested flag is blank (default true)").Bool()
+	suppressBlank     = get.Flag("suppress-blank", "Suppress outputing keys which only contain an empty string. Does not override --fail-if-empty").Bool()
+	allowMerge        = get.Flag("allow-merge", "Allow non-conflicting configuration from multiple domain paths to be merged. This is usually a bad idea").Bool()
+	additiveQuery     = get.Flag("additive", "Provide configuration for names from all domain levels. This means keys with the same name have their values combined.").Bool()
 
 	configKeys = get.Arg("name", "Key names (dns-prefixes) to search for configuration values. Returned in-order for simple, one-line and env output types.").Required().Strings()
 )
@@ -110,7 +125,6 @@ func main() {
 			}
 		}
 	}
-
 
 	var keys []string
 	var resultConfig map[string]string
@@ -268,6 +282,13 @@ func cmdGet() ([]string, map[string]string, error) {
 	// Query the DNS containers
 	log.Debugln("Starting DNS query")
 
+	lookupOptions := LookupOptions{
+		SrvOptions{
+			SuppressPort: *srvSuppressPort,
+			SuppressTrailingDot: *srvSuppressDot,
+		},
+	}
+
 	// All configurations are always retrieved. If multiple configurations are found, we fail with an error.
 	foundConfigs := make(map[string]map[string]string)
 
@@ -289,14 +310,15 @@ func cmdGet() ([]string, map[string]string, error) {
 				*requiredSuffix = hostname
 			}
 
-			values, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery)
+			values, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery, lookupOptions)
 			if found {
+				preFilteredResult := values
 				filteredResult := []string{}
 				switch *hostnameFilter {
 				case HostnameFilterNone:
-					filteredResult = values
+					filteredResult = preFilteredResult
 				case HostnameFilterOurs:
-					for _, value := range values {
+					for _, value := range preFilteredResult {
 						for _, hostname := range hostnames {
 							if strings.Contains(value, hostname) {
 								// Contains one of our hostnames, allow it through.
@@ -306,7 +328,7 @@ func cmdGet() ([]string, map[string]string, error) {
 						}
 					}
 				case HostnameFilterTheirs:
-					for _, value := range values {
+					for _, value := range preFilteredResult {
 						for _, hostname := range hostnames {
 							if !strings.Contains(value, hostname) {
 								// Does not contain one of our hostnames, allow
@@ -318,6 +340,34 @@ func cmdGet() ([]string, map[string]string, error) {
 					}
 				default:
 					return []string{}, nil, errors.New(fmt.Sprintln("Unknown hostname filter option:", *hostnameFilter))
+				}
+
+				if *reverseLookup {
+					preFilteredResult := filteredResult
+					filteredResult := []string{}
+					for _, value := range preFilteredResult {
+						// SRV records may produce a port artifact, which we want
+						// to keep so make a best effort.
+						host, port, perr := net.SplitHostPort(value)
+						if perr != nil {
+							// Probably no port. Set host to value.
+							host = value
+						}
+						ips, err := net.LookupIP(host)
+						if err != nil {
+							// Exclude failed lookups altogether.
+							log.Debugln("Error while doing reverse lookup of record - excluding:", value, err)
+						} else {
+							// Recombine possibly multiple returns into results.
+							for _, ip := range ips {
+								if perr != nil {
+									filteredResult = append(filteredResult, net.JoinHostPort(ip.String(), port))
+								} else {
+									filteredResult = append(filteredResult, ip.String())
+								}
+							}
+						}
+					}
 				}
 
 				ourConfig[name] = strings.Join(filteredResult, *entryJoiner)
@@ -538,7 +588,8 @@ func getLocalIPAddresses() ([]net.IP, error) {
 // Multiple entries are concatenated without spaces and returned as a single string.
 // Returns the value if any, and boolean indicating if the value was set blank
 // or was not found.
-func resolveConfig(recordType string, name string, hostname string, requiredSuffix string, recurse bool) ([]string, bool) {
+func resolveConfig(recordType string, name string, hostname string,
+	requiredSuffix string, recurse bool, lookupOptions LookupOptions) ([]string, bool) {
 	log := log.With("name", name).With("hostname", hostname)
 
 	// Split the hostname up into fragments
@@ -572,7 +623,20 @@ func resolveConfig(recordType string, name string, hostname string, requiredSuff
 			log.Debugln("SRV lookup got CNAME", srvCname)
 			// Construct a result array of <host>:<port> fragments.
 			for _, srvResult := range srvResults {
-				result = append(result, fmt.Sprintf("%s:%d", srvResult.Target, srvResult.Port))
+				var target string
+				if lookupOptions.SrvOptions.SuppressTrailingDot {
+					// Possibly post process it
+					target = strings.TrimSuffix(srvResult.Target, ".")
+				} else {
+					// Just leave it as is.
+					target = srvResult.Target
+				}
+
+				if lookupOptions.SrvOptions.SuppressPort {
+					result = append(result, fmt.Sprintf("%s", target))
+				} else {
+					result = append(result, fmt.Sprintf("%s:%d", target, srvResult.Port))
+				}
 			}
 		default:
 			log.Panicln("Unrecognized record type requested.")
