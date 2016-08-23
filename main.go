@@ -353,9 +353,7 @@ func cmdGet() ([]string, map[string]string, error) {
 		value, found := resultConfig[name]
 		if !found {
 			missingKeys = append(missingKeys, name)
-		}
-
-		if value == "" {
+		} else if value == "" {
 			blankKeys = append(blankKeys, name)
 		}
 	}
