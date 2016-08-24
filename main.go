@@ -310,10 +310,15 @@ func cmdGet() ([]string, map[string]string, error) {
 				*requiredSuffix = hostname
 			}
 
-			values, found := resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery, lookupOptions)
+			// These two variables are used to stage the result through the filtering chain.
+			var preFilteredResult []string
+			var filteredResult []string
+			var found bool
+
+			filteredResult, found = resolveConfig(*recordType, queryName, hostname, *requiredSuffix, *additiveQuery, lookupOptions)
 			if found {
-				preFilteredResult := values
-				filteredResult := []string{}
+				preFilteredResult = filteredResult
+				filteredResult = []string{}
 				switch *hostnameFilter {
 				case HostnameFilterNone:
 					filteredResult = preFilteredResult
@@ -343,8 +348,8 @@ func cmdGet() ([]string, map[string]string, error) {
 				}
 
 				if *reverseLookup {
-					preFilteredResult := filteredResult
-					filteredResult := []string{}
+					preFilteredResult = filteredResult
+					filteredResult = []string{}
 					for _, value := range preFilteredResult {
 						// SRV records may produce a port artifact, which we want
 						// to keep so make a best effort.
@@ -360,7 +365,7 @@ func cmdGet() ([]string, map[string]string, error) {
 						} else {
 							// Recombine possibly multiple returns into results.
 							for _, ip := range ips {
-								if perr != nil {
+								if perr == nil {
 									filteredResult = append(filteredResult, net.JoinHostPort(ip.String(), port))
 								} else {
 									filteredResult = append(filteredResult, ip.String())
