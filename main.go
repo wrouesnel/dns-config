@@ -38,7 +38,6 @@ const (
 
 type SrvOptions struct {
 	SuppressPort        bool
-	SuppressTrailingDot bool
 }
 
 // Wraps the various flags which influence DnsType specific lookups and how
@@ -76,7 +75,6 @@ var (
 
 	recordType        = get.Flag("record-type", fmt.Sprintf("DNS record type to search for (%s, %s)", DnsTypeSRV, DnsTypeTXT)).Default(DnsTypeTXT).Enum(DnsTypeSRV, DnsTypeTXT)
 	srvSuppressPort   = get.Flag("srv-no-port", "Don't return a port from SRV lookups").Bool()
-	srvSuppressDot    = get.Flag("srv-suppress-dot", "Suppress the canonical trailing dot in hostnames from SRV lookups (default true)").Default("true").Bool()
 	reverseLookup     = get.Flag("reverse-lookup", "Reverse lookup query results for IP addresses. Happens after hostname filtering.").Bool()
 	hostnameFilter    = get.Flag("filter-values-by-hostname", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
 	ipFilter          = get.Flag("filter-values-by-ip", fmt.Sprintf("Filter results by some critera (%s, %s, %s)", HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)).Default(HostnameFilterNone).Enum(HostnameFilterNone, HostnameFilterOurs, HostnameFilterTheirs)
@@ -285,7 +283,6 @@ func cmdGet() ([]string, map[string]string, error) {
 	lookupOptions := LookupOptions{
 		SrvOptions{
 			SuppressPort: *srvSuppressPort,
-			SuppressTrailingDot: *srvSuppressDot,
 		},
 	}
 
@@ -628,19 +625,10 @@ func resolveConfig(recordType string, name string, hostname string,
 			log.Debugln("SRV lookup got CNAME", srvCname)
 			// Construct a result array of <host>:<port> fragments.
 			for _, srvResult := range srvResults {
-				var target string
-				if lookupOptions.SrvOptions.SuppressTrailingDot {
-					// Possibly post process it
-					target = strings.TrimSuffix(srvResult.Target, ".")
-				} else {
-					// Just leave it as is.
-					target = srvResult.Target
-				}
-
 				if lookupOptions.SrvOptions.SuppressPort {
-					result = append(result, fmt.Sprintf("%s", target))
+					result = append(result, fmt.Sprintf("%s", srvResult.Target))
 				} else {
-					result = append(result, fmt.Sprintf("%s:%d", target, srvResult.Port))
+					result = append(result, fmt.Sprintf("%s:%d", srvResult.Target, srvResult.Port))
 				}
 			}
 		default:
