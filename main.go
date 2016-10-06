@@ -331,13 +331,16 @@ func cmdGet() ([]string, map[string]string, error) {
 					}
 				case HostnameFilterTheirs:
 					for _, value := range preFilteredResult {
+						hasHostname := false
 						for _, hostname := range hostnames {
-							if !strings.Contains(value, hostname) {
-								// Does not contain one of our hostnames, allow
-								// it through.
-								filteredResult = append(filteredResult, value)
+							if strings.Contains(value, hostname) {
+								// Has one of our hostnames
+								hasHostname = true
 								break
 							}
+						}
+						if !hasHostname {
+							filteredResult = append(filteredResult, value)
 						}
 					}
 				default:
