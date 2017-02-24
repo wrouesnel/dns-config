@@ -1,4 +1,6 @@
 [![Build Status](https://travis-ci.org/wrouesnel/dns-config.svg?branch=master)](https://travis-ci.org/wrouesnel/dns-config)
+[![Coverage Status](https://coveralls.io/repos/github/wrouesnel/dns-config/badge.svg)](https://coveralls.io/github/wrouesnel/dns-config)
+[![Go Report Card](https://goreportcard.com/badge/github.com/wrouesnel/dns-config)](https://goreportcard.com/report/github.com/wrouesnel/dns-config)
 
 # DNS Config
 

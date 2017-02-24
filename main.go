@@ -97,7 +97,12 @@ type IPHostnamesPair struct {
 
 type getWriterFunc func() (io.WriteCloser, error)
 
+// For testability, the main() function just calls realMain()
 func main() {
+	os.Exit(realMain())
+}
+
+func realMain() int {
 	kingpin.CommandLine.HelpFlag.Short('h')
 	app.Version(Version)
 	parsedCmd := kingpin.MustParse(app.Parse(os.Args[1:]))
@@ -112,13 +117,13 @@ func main() {
 			st, err := os.Stat(*output)
 			if *outputOverwrite && !os.IsNotExist(err) {
 				log.Debugln("Output file exists and no overwrite requested. Exiting with success.")
-				os.Exit(0)
+				return 0
 			}
 
 			if err == nil {
 				if st.Size() != 0 && !*outputOnlyIfEmpty {
 					log.Debugln("Requested output only if the target file is empty and it is not.")
-					os.Exit(0)
+					return 0
 				}
 			}
 		}
@@ -139,7 +144,7 @@ func main() {
 
 	if err != nil {
 		log.Errorln(err)
-		os.Exit(1)
+		return 1
 	}
 
 	// Setup output file
@@ -157,7 +162,7 @@ func main() {
 		outfd, err = os.OpenFile(*outputPath, flags, os.FileMode(0777))
 		if err != nil {
 			log.Errorln("Could not open output file:", err)
-			os.Exit(1)
+			return 1
 		}
 	}
 
@@ -167,10 +172,10 @@ func main() {
 	// Write output
 	if err := writeOutput(*output, keys, resultConfig, outfd, *outputPrefix, *outputSuffix, *suppressBlank); err != nil {
 		log.Errorln("Error writing output:", err)
-		os.Exit(1)
+		return 1
 	}
 	outfd.Close()
-	os.Exit(0)
+	return 0
 }
 
 // get-ips returns all the discovered IPs on the machine, optionally filtered
